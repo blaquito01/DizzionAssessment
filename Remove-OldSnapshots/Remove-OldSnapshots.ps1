@@ -27,13 +27,8 @@ param(
     [string]$ToAddress 
 )
 
-# Using stored credential file for authentication
-$username = [Environment]::UserName
-$domain = (Get-ADDomain -Current LocalComputer).Name 
-$duser = "$domain\$username"
-$pass = get-content C:\creds\$username.cred | convertto-securestring
-$mycred = new-object -typename System.Management.Automation.PSCredential -argumentlist $duser,$pass
-
+# Storing credential file for authentication
+$mycred = Get-Credential
 
 #------- Snap-in imports -------#
 Import-Module VMware.Powercli
@@ -41,17 +36,23 @@ Import-Module VMware.Powercli
 #------- Set to address and subject -------#
 $Subject = "Deleted VM Snapshots Report"
 
+#Setting up arrays
 $AllSnaps = @()
 $DeleteSnaps = @()
 $SnapReport = @()
 $HTMLSnaps = @()
+
+#creating date stamp for report
 $Date = Get-date 
 $Date = $date.ToString('MM-dd_hh-mm')
 
+#Connecting to vCenter
 Connect-VIServer -Server $vcenter -Credential $mycred
 
+#Gathering all Snapshot information from vcenter adding expression to easily identify 30 day old snapshots
 $AllSnaps = get-snapshot -vm * | select-object VM, Name, Description, SizeMB, @{Name="Age";Expression={((Get-Date)-$_.Created).Days}}
 
+#Deleting 30 day old snapshots
 $DeleteSnaps = $AllSnaps | where {($_.age -gt 29)}
 
 if ($deleteSnaps -ne $null){
@@ -62,6 +63,7 @@ if ($deleteSnaps -ne $null){
     write-host "No Snapshots to clean up" -ForegroundColor Red
 }
 
+#Creating email Report and sending
 $SnapReport = $DeleteSnaps | Select-Object VM, Name, Description, SizeMB, Age 
 
 $HTMLSnaps = $SnapReport | ConvertTo-Html | Out-String
@@ -72,4 +74,5 @@ Send-MailMessage -To $ToAddress -Subject $Subject `
   -SmtpServer smtp.Joneslab.com  -From ProdReports@joneslab.com `
   -BodyAsHtml -Body $HTMLSnaps 
 
+#Disconnecting from vcenter after all operations are complete
 Disconnect-VIServer -Server $vcenter -confirm:$false
